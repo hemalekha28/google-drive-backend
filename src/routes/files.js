@@ -136,6 +136,9 @@ router.patch("/:id/unshare",unshareFile);
 // ✅ Rename file
 router.patch("/:id/rename",renameFile);
 
+// ✅ Permanently delete file
+router.patch('/:id/permanent', authenticate, validateMongoId, permanentlyDeleteFile);
+
 // Test routes for debugging
 router.get('/test/ping', (req, res) => {
   res.json({
