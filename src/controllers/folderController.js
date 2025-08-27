@@ -559,10 +559,11 @@ const getTrashFolders = async (req, res) => {
   }
 };
 
-// Permanently delete folder
 const permanentlyDeleteFolder = async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Find the folder to delete (must be soft-deleted)
     const folder = await Folder.findOne({
       _id: id,
       owner: req.user._id,
@@ -570,38 +571,45 @@ const permanentlyDeleteFolder = async (req, res) => {
     });
 
     if (!folder) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Folder not found in trash" 
+      return res.status(404).json({
+        success: false,
+        message: "Folder not found in trash"
       });
     }
 
-    // Find all descendant folders
+    console.log("Folder to delete:", folder._id, folder.name);
+
+    // Find all descendant folders (any level deep)
     const descendants = await Folder.find({
       path: { $regex: `^${folder.path}/` },
       owner: req.user._id
     });
+
+    console.log("Descendants found:", descendants.length);
+
     const allFolderIds = [folder._id, ...descendants.map(f => f._id)];
+    console.log("All folder IDs to delete:", allFolderIds);
 
-    // Delete files permanently
-    await File.deleteMany({ folder: { $in: allFolderIds } });
+    // Delete all files in these folders
+    const deletedFiles = await File.deleteMany({ folder: { $in: allFolderIds } });
+    console.log("Deleted files count:", deletedFiles.deletedCount);
 
-    // Delete folders permanently
-    await Folder.deleteMany({ _id: { $in: allFolderIds } });
+    // Delete the folders themselves
+    const deletedFolders = await Folder.deleteMany({ _id: { $in: allFolderIds } });
+    console.log("Deleted folders count:", deletedFolders.deletedCount);
 
-    res.json({ 
-      success: true, 
-      message: "Folder and its contents permanently deleted" 
+    res.json({
+      success: true,
+      message: `Folder "${folder.name}" and its contents permanently deleted`,
     });
   } catch (error) {
-    console.error('Permanently delete folder error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
+    console.error("Error in permanentlyDeleteFolder:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
     });
   }
 };
-
 // Share folder with user
 const shareFolderWithUser = async (req, res) => {
   try {
