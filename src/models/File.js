@@ -67,8 +67,7 @@ const fileSchema = new mongoose.Schema({
   },
   shareToken: {
     type: String,
-    default: null,
-    sparse: true,
+    default: () => Math.random().toString(36).substring(2, 15),
     unique: true
   },
   shareExpiresAt: {
