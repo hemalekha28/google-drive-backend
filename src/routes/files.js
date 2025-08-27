@@ -15,7 +15,8 @@ const {
   unshareFile,
   getTrashedFiles,
   restoreFile,
-  downloadFile
+  downloadFile,
+  permanentlyDeleteFile
 } = require('../controllers/fileController');
 
 const router = express.Router();

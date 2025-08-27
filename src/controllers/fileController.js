@@ -304,6 +304,26 @@ const renameFile = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+//Pdf
+// Permanently delete a file from MongoDB
+const permanentlyDeleteFile = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const file = await File.findById(id);
+    if (!file) {
+      return res.status(404).json({ success: false, message: 'File not found' });
+    }
+
+    await file.deleteOne(); // actually remove from DB
+
+    res.json({ success: true, message: `${file.name} permanently deleted` });
+  } catch (err) {
+    console.error('Error permanently deleting file:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
 
 // Delete file
 const deleteFile = async (req, res) => {
@@ -423,5 +443,6 @@ module.exports = {
   unshareFile,
   getTrashedFiles,
   restoreFile,
-  downloadFile
+  downloadFile,
+  permanentlyDeleteFile
 };
