@@ -558,16 +558,18 @@ const getTrashFolders = async (req, res) => {
     });
   }
 };
-
 const permanentlyDeleteFolder = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Find the folder to delete (must be soft-deleted)
+    // Find the folder to delete (must be in trash)
     const folder = await Folder.findOne({
       _id: id,
       owner: req.user._id,
-      isDeleted: true
+      $or: [
+        { isDeleted: true },
+        { deletedAt: { $ne: null } }
+      ]
     });
 
     if (!folder) {
@@ -579,7 +581,7 @@ const permanentlyDeleteFolder = async (req, res) => {
 
     console.log("Folder to delete:", folder._id, folder.name);
 
-    // Find all descendant folders (any level deep)
+    // Find all descendant folders
     const descendants = await Folder.find({
       path: { $regex: `^${folder.path}/` },
       owner: req.user._id
@@ -600,16 +602,17 @@ const permanentlyDeleteFolder = async (req, res) => {
 
     res.json({
       success: true,
-      message: `Folder "${folder.name}" and its contents permanently deleted`,
+      message: `Folder "${folder.name}" and its contents permanently deleted`
     });
   } catch (error) {
     console.error("Error in permanentlyDeleteFolder:", error);
     res.status(500).json({
       success: false,
-      message: error.message,
+      message: error.message
     });
   }
 };
+
 // Share folder with user
 const shareFolderWithUser = async (req, res) => {
   try {
