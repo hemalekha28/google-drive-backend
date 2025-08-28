@@ -614,12 +614,13 @@ const permanentlyDeleteFolder = async (req, res) => {
 // Share folder with user
 const shareFolderWithUser = async (req, res) => {
   try {
-    const { email, permissions = 'read' } = req.body;
+    const { email, permission = 'read' } = req.body;
 
-    if (!email) {
+    // Validate email
+    if (!email || !/\S+@\S+\.\S+/.test(email)) {
       return res.status(400).json({
         success: false,
-        message: 'Email is required'
+        message: 'Valid email is required'
       });
     }
 
@@ -641,7 +642,7 @@ const shareFolderWithUser = async (req, res) => {
     if (!userToShareWith) {
       return res.status(404).json({
         success: false,
-        message: 'User not found'
+        message: 'User not found with this email'
       });
     }
 
@@ -655,7 +656,10 @@ const shareFolderWithUser = async (req, res) => {
 
     // Initialize shareSettings if it doesn't exist
     if (!folder.shareSettings) {
-      folder.shareSettings = { isPublic: false, sharedWith: [] };
+      folder.shareSettings = { 
+        isPublic: false, 
+        sharedWith: [] 
+      };
     }
 
     // Check if already shared
@@ -665,28 +669,144 @@ const shareFolderWithUser = async (req, res) => {
 
     if (existingShareIndex !== -1) {
       // Update existing share
-      folder.shareSettings.sharedWith[existingShareIndex].permissions = permissions;
+      folder.shareSettings.sharedWith[existingShareIndex].permission = permission;
       folder.shareSettings.sharedWith[existingShareIndex].sharedAt = new Date();
     } else {
       // Add new share
       folder.shareSettings.sharedWith.push({
         user: userToShareWith._id,
-        permissions,
+        permission,
         sharedAt: new Date()
       });
     }
 
+    // Generate share token if doesn't exist
+    if (!folder.shareToken) {
+      folder.shareToken = crypto.randomBytes(16).toString("hex");
+    }
+    
+    folder.isShared = true;
     await folder.save();
+
+    // Populate user details for response
+    await folder.populate('shareSettings.sharedWith.user', 'name email');
 
     res.json({
       success: true,
-      message: `Folder shared with ${email} successfully`
+      message: `Folder shared with ${email} successfully`,
+      folder: {
+        id: folder._id,
+        name: folder.name,
+        isShared: folder.isShared,
+        shareToken: folder.shareToken,
+        shareSettings: folder.shareSettings,
+        shareUrl: `${process.env.FRONTEND_URL}/shared/${folder.shareToken}`
+      }
     });
   } catch (error) {
     console.error('Share folder error:', error);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: 'Failed to share folder'
+    });
+  }
+};
+
+const getSharedFolder = async (req, res) => {
+  try {
+    const { token } = req.params;
+    
+    const folder = await Folder.findOne({ 
+      shareToken: token, 
+      isShared: true,
+      isDeleted: false 
+    })
+    .populate('owner', 'name email')
+    .populate('shareSettings.sharedWith.user', 'name email');
+
+    if (!folder) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Shared folder not found or link expired" 
+      });
+    }
+
+    // Check if user has access
+    let hasAccess = true;
+    let userPermission = 'read';
+
+    if (req.user) {
+      if (folder.owner._id.toString() === req.user._id.toString()) {
+        userPermission = 'owner';
+      } else {
+        const sharedUser = folder.shareSettings.sharedWith.find(
+          share => share.user._id.toString() === req.user._id.toString()
+        );
+        
+        if (sharedUser) {
+          userPermission = sharedUser.permission;
+        } else if (!folder.shareSettings.isPublic) {
+          hasAccess = false;
+        }
+      }
+    } else if (!folder.shareSettings.isPublic) {
+      hasAccess = false;
+    }
+
+    if (!hasAccess) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. You need permission to view this folder.'
+      });
+    }
+
+    // Get folder contents
+    const [subfolders, files] = await Promise.all([
+      Folder.find({
+        parent: folder._id,
+        isDeleted: false
+      }).populate('owner', 'name email'),
+      
+      File.find({
+        folder: folder._id,
+        isDeleted: false
+      }).populate('owner', 'name email')
+    ]);
+
+    res.json({ 
+      success: true, 
+      folder: {
+        id: folder._id,
+        name: folder.name,
+        path: folder.path,
+        owner: folder.owner,
+        userPermission,
+        contents: {
+          folders: subfolders.map(f => ({
+            id: f._id,
+            name: f.name,
+            owner: f.owner,
+            createdAt: f.createdAt
+          })),
+          files: files.map(f => ({
+            id: f._id,
+            name: f.name,
+            size: f.size,
+            mimeType: f.mimeType,
+            url: f.cloudinaryUrl,
+            owner: f.owner,
+            createdAt: f.createdAt
+          }))
+        },
+        createdAt: folder.createdAt
+      }
+    });
+    
+  } catch (error) {
+    console.error("Error fetching shared folder:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Server error" 
     });
   }
 };
@@ -759,5 +879,6 @@ module.exports = {
   getTrashFolders,
   permanentlyDeleteFolder,
   shareFolderWithUser,
-  getFolderBreadcrumb
+  getFolderBreadcrumb,
+  getSharedFolder
 };

@@ -16,7 +16,8 @@ const {
   getTrashedFiles,
   restoreFile,
   downloadFile,
-  permanentlyDeleteFile
+  permanentlyDeleteFile,
+  getSharedFile
 } = require('../controllers/fileController');
 
 const router = express.Router();
@@ -110,6 +111,7 @@ router.get('/:id', authenticate, validateMongoId, getFileById);
 
 router.delete('/:id', authenticate, validateMongoId, deleteFile);
 
+router.get('/shared/:token', authenticate, getSharedFile);
 // Download file (stream from Cloudinary)
 router.get('/:id/download', async (req, res) => {
   try {

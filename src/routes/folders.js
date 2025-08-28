@@ -14,7 +14,8 @@ const {
   getTrashFolders,
   shareFolderWithUser,
   getFolderBreadcrumb,
-  permanentlyDeleteFolder
+  permanentlyDeleteFolder,
+  getSharedFolder
 } = require('../controllers/folderController');
 
 const { authenticate } = require('../middleware/auth');
@@ -54,6 +55,8 @@ router.delete('/:id', authenticate, mongoIdValidation, deleteFolder);
 
 // FIXED: Restore folder from trash
 router.post('/:id/restore', authenticate, mongoIdValidation, restoreFolder);
+
+router.get('/shared/:token', optionalAuth, getSharedFolder);
 
 // Share folder
 router.patch('/:id/share', authenticate, mongoIdValidation, shareValidation, shareFolderWithUser);

@@ -60,6 +60,7 @@ const fileSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   },
+  
   // Sharing functionality
   isShared: {
     type: Boolean,
@@ -67,47 +68,41 @@ const fileSchema = new mongoose.Schema({
   },
   shareToken: {
     type: String,
-    default: () => Math.random().toString(36).substring(2, 15),
-    unique: true
+    unique: true,
+    sparse: true
   },
-  shareExpiresAt: {
-    type: Date,
-    default: null
-  },
-  sharePermissions: {
-    type: String,
-    enum: ['read', 'write'],
-    default: 'read'
-  },
-  sharedWith: [{
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
+  shareSettings: {
+    isPublic: {
+      type: Boolean,
+      default: false
     },
-    permissions: {
-      type: String,
-      enum: ['read', 'write'],
-      default: 'read'
-    },
-    sharedAt: {
-      type: Date,
-      default: Date.now
-    }
-  }],
+    sharedWith: [{
+      user: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
+      },
+      permission: {
+        type: String,
+        enum: ['read', 'edit'],
+        default: 'read'
+      },
+      sharedAt: {
+        type: Date,
+        default: Date.now
+      }
+    }]
+  },
+  
   // Tags for organization
   tags: [{
     type: String,
     trim: true,
     maxlength: 50
   }],
-  // Version control (for future use)
   version: {
     type: Number,
     default: 1
-  },
-  isPublic: {
-    type: Boolean,
-    default: false
   }
 }, {
   timestamps: true
@@ -120,6 +115,7 @@ fileSchema.index({ shareToken: 1 });
 fileSchema.index({ name: 'text', originalName: 'text' });
 fileSchema.index({ mimeType: 1 });
 fileSchema.index({ createdAt: -1 });
+fileSchema.index({ isShared: 1 });
 
 // Virtual for file URL
 fileSchema.virtual('url').get(function() {
@@ -144,27 +140,34 @@ fileSchema.methods.restore = function() {
 fileSchema.methods.isAccessibleBy = function(userId) {
   // Owner always has access
   if (this.owner.toString() === userId.toString()) {
-    return { access: true, permission: 'admin' };
+    return { access: true, permission: 'owner' };
   }
   
   // Check if shared with user
-  const sharedItem = this.sharedWith.find(
-    item => item.user.toString() === userId.toString()
-  );
+  if (this.shareSettings && this.shareSettings.sharedWith) {
+    const sharedItem = this.shareSettings.sharedWith.find(
+      item => item.user.toString() === userId.toString()
+    );
+    
+    if (sharedItem) {
+      return { access: true, permission: sharedItem.permission };
+    }
+  }
   
-  if (sharedItem) {
-    return { access: true, permission: sharedItem.permissions };
+  // Check if public
+  if (this.shareSettings && this.shareSettings.isPublic) {
+    return { access: true, permission: 'read' };
   }
   
   return { access: false, permission: null };
 };
 
-// Static method to get user's storage usage - FIXED VERSION
+// Static method to get user's storage usage
 fileSchema.statics.getUserStorageUsage = async function(userId) {
   const result = await this.aggregate([
     {
       $match: {
-        owner: new mongoose.Types.ObjectId(userId), // Fixed deprecated usage
+        owner: new mongoose.Types.ObjectId(userId),
         isDeleted: false
       }
     },
@@ -182,7 +185,6 @@ fileSchema.statics.getUserStorageUsage = async function(userId) {
 
 // Pre-save middleware
 fileSchema.pre('save', function(next) {
-  // Update lastAccessed when file is modified
   if (this.isModified() && !this.isModified('lastAccessed')) {
     this.lastAccessed = new Date();
   }
@@ -197,7 +199,7 @@ fileSchema.pre('remove', async function(next) {
     next();
   } catch (error) {
     console.error('Error deleting from Cloudinary:', error);
-    next(); // Continue with deletion even if Cloudinary fails
+    next();
   }
 });
 

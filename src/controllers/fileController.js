@@ -468,24 +468,177 @@ const searchFiles = async (req, res) => {
 
 const shareFile = async (req, res) => {
   try {
-    const file = await File.findById(req.params.id);
-    if (!file) {
-      return res.status(404).json({ message: "File not found" });
+    const { email, permission = 'read' } = req.body;
+
+    // Validate email
+    if (!email || !/\S+@\S+\.\S+/.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid email is required'
+      });
     }
 
-    // generate share token
-    file.shareToken = crypto.randomBytes(16).toString("hex");
-    file.isShared = true;
+    // Find the file
+    const file = await File.findOne({
+      _id: req.params.id,
+      owner: req.user._id,
+      isDeleted: false
+    });
 
+    if (!file) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+
+    // Find user to share with
+    const userToShareWith = await User.findOne({ email });
+    if (!userToShareWith) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found with this email'
+      });
+    }
+
+    // Don't allow sharing with yourself
+    if (userToShareWith._id.toString() === req.user._id.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot share file with yourself'
+      });
+    }
+
+    // Initialize shareSettings if it doesn't exist
+    if (!file.shareSettings) {
+      file.shareSettings = {
+        isPublic: false,
+        sharedWith: []
+      };
+    }
+
+    // Check if already shared with this user
+    const existingShareIndex = file.shareSettings.sharedWith.findIndex(
+      share => share.user.toString() === userToShareWith._id.toString()
+    );
+
+    if (existingShareIndex !== -1) {
+      // Update existing share permission
+      file.shareSettings.sharedWith[existingShareIndex].permission = permission;
+      file.shareSettings.sharedWith[existingShareIndex].sharedAt = new Date();
+    } else {
+      // Add new share
+      file.shareSettings.sharedWith.push({
+        user: userToShareWith._id,
+        permission,
+        sharedAt: new Date()
+      });
+    }
+
+    // Generate share token if doesn't exist
+    if (!file.shareToken) {
+      file.shareToken = crypto.randomBytes(16).toString("hex");
+    }
+    
+    file.isShared = true;
     await file.save();
 
+    // Populate user details for response
+    await file.populate('shareSettings.sharedWith.user', 'name email');
+
     res.json({
-      message: "File shared successfully",
-      shareUrl: `${process.env.FRONTEND_URL}/share/${file.shareToken}`,
+      success: true,
+      message: `File shared with ${email} successfully`,
+      file: {
+        id: file._id,
+        name: file.name,
+        isShared: file.isShared,
+        shareToken: file.shareToken,
+        shareSettings: file.shareSettings,
+        shareUrl: `${process.env.FRONTEND_URL}/shared/${file.shareToken}`
+      }
     });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Error sharing file" });
+
+  } catch (error) {
+    console.error('Share file error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to share file'
+    });
+  }
+};
+
+const getSharedFile = async (req, res) => {
+  try {
+    const { token } = req.params;
+    
+    const file = await File.findOne({ 
+      shareToken: token, 
+      isShared: true,
+      isDeleted: false 
+    })
+    .populate('owner', 'name email')
+    .populate('shareSettings.sharedWith.user', 'name email');
+
+    if (!file) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Shared file not found or link expired" 
+      });
+    }
+
+    // Check if user has access (if authenticated)
+    let hasAccess = true;
+    let userPermission = 'read';
+
+    if (req.user) {
+      // If user is owner
+      if (file.owner._id.toString() === req.user._id.toString()) {
+        userPermission = 'owner';
+      } else {
+        // Check if user is in shared list
+        const sharedUser = file.shareSettings.sharedWith.find(
+          share => share.user._id.toString() === req.user._id.toString()
+        );
+        
+        if (sharedUser) {
+          userPermission = sharedUser.permission;
+        } else if (!file.shareSettings.isPublic) {
+          hasAccess = false;
+        }
+      }
+    } else if (!file.shareSettings.isPublic) {
+      hasAccess = false;
+    }
+
+    if (!hasAccess) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. You need permission to view this file.'
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      file: {
+        id: file._id,
+        name: file.name,
+        originalName: file.originalName,
+        size: file.size,
+        mimeType: file.mimeType,
+        url: file.cloudinaryUrl,
+        owner: file.owner,
+        userPermission,
+        createdAt: file.createdAt
+      }
+    });
+    
+  } catch (error) {
+    console.error("Error fetching shared file:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Server error" 
+    });
   }
 };
 
@@ -501,5 +654,6 @@ module.exports = {
   getTrashedFiles,
   restoreFile,
   downloadFile,
-  permanentlyDeleteFile
+  permanentlyDeleteFile,
+  getSharedFile
 };

@@ -15,7 +15,7 @@ const folderSchema = new mongoose.Schema({
   parent: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Folder',
-    default: null // null means root folder
+    default: null
   },
   path: {
     type: String,
@@ -23,7 +23,7 @@ const folderSchema = new mongoose.Schema({
   },
   color: {
     type: String,
-    default: '#1976d2' // Blue color
+    default: '#1976d2'
   },
   description: {
     type: String,
@@ -38,6 +38,17 @@ const folderSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  
+  // Sharing functionality
+  isShared: {
+    type: Boolean,
+    default: false
+  },
+  shareToken: {
+    type: String,
+    unique: true,
+    sparse: true
+  },
   shareSettings: {
     isPublic: {
       type: Boolean,
@@ -46,11 +57,12 @@ const folderSchema = new mongoose.Schema({
     sharedWith: [{
       user: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
+        ref: 'User',
+        required: true
       },
-      permissions: {
+      permission: {
         type: String,
-        enum: ['read', 'write', 'admin'],
+        enum: ['read', 'edit'],
         default: 'read'
       },
       sharedAt: {
@@ -63,11 +75,14 @@ const folderSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index for better performance
+// Indexes for better performance
 folderSchema.index({ owner: 1, isDeleted: 1 });
 folderSchema.index({ parent: 1, isDeleted: 1 });
 folderSchema.index({ path: 1 });
+folderSchema.index({ shareToken: 1 });
+folderSchema.index({ isShared: 1 });
 
+// Pre-validate middleware for path generation
 folderSchema.pre('validate', async function(next) {
   if (this.isModified('parent') || this.isNew) {
     if (this.parent) {
@@ -81,7 +96,6 @@ folderSchema.pre('validate', async function(next) {
   }
   next();
 });
-
 
 // Method to soft delete
 folderSchema.methods.softDelete = function() {
@@ -97,6 +111,31 @@ folderSchema.methods.restore = function() {
   return this.save();
 };
 
+// Method to check folder access
+folderSchema.methods.isAccessibleBy = function(userId) {
+  // Owner always has access
+  if (this.owner.toString() === userId.toString()) {
+    return { access: true, permission: 'owner' };
+  }
+  
+  // Check if shared with user
+  if (this.shareSettings && this.shareSettings.sharedWith) {
+    const sharedItem = this.shareSettings.sharedWith.find(
+      item => item.user.toString() === userId.toString()
+    );
+    
+    if (sharedItem) {
+      return { access: true, permission: sharedItem.permission };
+    }
+  }
+  
+  // Check if public
+  if (this.shareSettings && this.shareSettings.isPublic) {
+    return { access: true, permission: 'read' };
+  }
+  
+  return { access: false, permission: null };
+};
 
 // Method to get breadcrumb
 folderSchema.methods.getBreadcrumb = async function() {
@@ -116,9 +155,7 @@ folderSchema.methods.getBreadcrumb = async function() {
     }
   }
   
-  // Add root
   breadcrumb.unshift({ _id: null, name: 'Root' });
-  
   return breadcrumb;
 };
 
