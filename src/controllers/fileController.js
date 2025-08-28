@@ -265,7 +265,11 @@ const restoreFile = async (req, res) => {
 
 const getTrashedFiles = async (req, res) => {
   try {
-    const trashedFiles = await File.find({ isDeleted: true });
+        const trashedFiles = await File.find({ 
+      owner: req.user._id, 
+      isDeleted: true 
+    });
+
     res.json({ success: true, trashedFiles });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -310,10 +314,15 @@ const permanentlyDeleteFile = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const file = await File.findById(id);
-    if (!file) {
-      return res.status(404).json({ success: false, message: 'File not found' });
-    }
+    const file = await File.findOne({
+        _id: id,
+        owner: req.user._id,
+        isDeleted: true
+  });
+  if (!file) {
+    return res.status(404).json({ success: false, message: 'File not found in trash' });
+  }
+
 
     await file.deleteOne(); // actually remove from DB
 

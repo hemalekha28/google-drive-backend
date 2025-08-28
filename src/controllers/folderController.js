@@ -562,14 +562,10 @@ const permanentlyDeleteFolder = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Find the folder to delete (must be in trash)
     const folder = await Folder.findOne({
       _id: id,
       owner: req.user._id,
-      $or: [
-        { isDeleted: true },
-        { deletedAt: { $ne: null } }
-      ]
+      isDeleted: true
     });
 
     if (!folder) {
@@ -579,39 +575,36 @@ const permanentlyDeleteFolder = async (req, res) => {
       });
     }
 
-    console.log("Folder to delete:", folder._id, folder.name);
-
-    // Find all descendant folders
+    // Find all descendants (also must belong to same user)
     const descendants = await Folder.find({
       path: { $regex: `^${folder.path}/` },
       owner: req.user._id
     });
 
-    console.log("Descendants found:", descendants.length);
-
     const allFolderIds = [folder._id, ...descendants.map(f => f._id)];
-    console.log("All folder IDs to delete:", allFolderIds);
 
     // Delete all files in these folders
-    const deletedFiles = await File.deleteMany({ folder: { $in: allFolderIds } });
-    console.log("Deleted files count:", deletedFiles.deletedCount);
+    await File.deleteMany({ 
+      folder: { $in: allFolderIds },
+      owner: req.user._id
+    });
 
     // Delete the folders themselves
-    const deletedFolders = await Folder.deleteMany({ _id: { $in: allFolderIds } });
-    console.log("Deleted folders count:", deletedFolders.deletedCount);
+    await Folder.deleteMany({ _id: { $in: allFolderIds } });
 
     res.json({
       success: true,
-      message: `Folder "${folder.name}" and its contents permanently deleted`
+      message: `Folder "${folder.name}" and all contents permanently deleted`
     });
   } catch (error) {
-    console.error("Error in permanentlyDeleteFolder:", error);
+    console.error("Permanently delete folder error:", error);
     res.status(500).json({
       success: false,
       message: error.message
     });
   }
 };
+
 
 // Share folder with user
 const shareFolderWithUser = async (req, res) => {
