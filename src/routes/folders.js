@@ -56,7 +56,7 @@ router.delete('/:id', authenticate, mongoIdValidation, deleteFolder);
 // FIXED: Restore folder from trash
 router.post('/:id/restore', authenticate, mongoIdValidation, restoreFolder);
 
-router.get('/shared/:token', optionalAuth, getSharedFolder);
+router.get('/shared/:token', authenticate, getSharedFolder);
 
 // Share folder
 router.patch('/:id/share', authenticate, mongoIdValidation, shareValidation, shareFolderWithUser);
