@@ -248,34 +248,67 @@ const downloadFile = async (req, res) => {
   }
 };
  
+// FIXED: Restore file from trash
 const restoreFile = async (req, res) => {
   try {
-    const file = await File.findByIdAndUpdate(
-      req.params.id,
-      { isDeleted: false },
-      { new: true }
-    );
-    if (!file) return res.status(404).json({ success: false, message: "File not found" });
-
-    res.json({ success: true, message: "File restored successfully", file });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-const getTrashedFiles = async (req, res) => {
-  try {
-        const trashedFiles = await File.find({ 
-      owner: req.user._id, 
-      isDeleted: true 
+    const file = await File.findOne({
+      _id: req.params.id,
+      owner: req.user._id, // FIXED: Only user's files
+      isDeleted: true
     });
 
-    res.json({ success: true, trashedFiles });
+    if (!file) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "File not found in trash" 
+      });
+    }
+
+    // Use the model's restore method
+    await file.restore();
+
+    res.json({ 
+      success: true, 
+      message: "File restored successfully", 
+      file: {
+        id: file._id,
+        name: file.name,
+        originalName: file.originalName,
+        size: file.size,
+        mimeType: file.mimeType,
+        url: file.cloudinaryUrl,
+        createdAt: file.createdAt
+      }
+    });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    console.error('Restore file error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: err.message 
+    });
   }
 };
 
+// FIXED: Get trashed files - only user's files
+const getTrashedFiles = async (req, res) => {
+  try {
+    const trashedFiles = await File.find({ 
+      owner: req.user._id, // FIXED: Only user's files
+      isDeleted: true 
+    }).sort({ deletedAt: -1 }); // Sort by deletion date
+
+    res.json({ 
+      success: true, 
+      trashedFiles // This matches your frontend expectation
+    });
+  } catch (err) {
+    console.error('Get trashed files error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: err.message 
+    });
+  }
+};
 const unshareFile = async (req, res) => {
   try {
     const file = await File.findByIdAndUpdate(
@@ -310,36 +343,53 @@ const renameFile = async (req, res) => {
 };
 //Pdf
 // Permanently delete a file from MongoDB
+// FIXED: Permanently delete file
 const permanentlyDeleteFile = async (req, res) => {
   try {
     const { id } = req.params;
 
     const file = await File.findOne({
-        _id: id,
-        owner: req.user._id,
-        isDeleted: true
-  });
-  if (!file) {
-    return res.status(404).json({ success: false, message: 'File not found in trash' });
-  }
+      _id: id,
+      owner: req.user._id, // FIXED: Only user's files
+      isDeleted: true
+    });
 
+    if (!file) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'File not found in trash' 
+      });
+    }
 
-    await file.deleteOne(); // actually remove from DB
+    // Actually remove from database
+    await File.deleteOne({ _id: id, owner: req.user._id });
 
-    res.json({ success: true, message: `${file.name} permanently deleted` });
+    // Update user storage usage
+    await User.findByIdAndUpdate(
+      req.user._id, 
+      { $inc: { storageUsed: -file.size } }
+    );
+
+    res.json({ 
+      success: true, 
+      message: `${file.name} permanently deleted` 
+    });
   } catch (err) {
     console.error('Error permanently deleting file:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error' 
+    });
   }
 };
 
-
 // Delete file
+// FIXED: Delete file (soft delete) - ensure it moves to trash
 const deleteFile = async (req, res) => {
   try {
     const file = await File.findOne({
       _id: req.params.id,
-      owner: req.user._id,
+      owner: req.user._id, // FIXED: Only user's files
       isDeleted: false
     });
 
@@ -350,11 +400,8 @@ const deleteFile = async (req, res) => {
       });
     }
 
-    // Soft delete
+    // Use the model's softDelete method
     await file.softDelete();
-
-    // Update user storage (optional - you might want to keep this for trash restore)
-    // await User.findByIdAndUpdate(req.user._id, { $inc: { storageUsed: -file.size } });
 
     res.json({
       success: true,
@@ -369,6 +416,7 @@ const deleteFile = async (req, res) => {
     });
   }
 };
+
 
 // Search files
 const searchFiles = async (req, res) => {

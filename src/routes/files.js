@@ -126,20 +126,16 @@ router.get('/:id/download', async (req, res) => {
 
 
 // ✅ Restore file from trash
-router.patch("/:id/restore",restoreFile);
-
+router.patch("/:id/restore", authenticate, validateMongoId, restoreFile);
 // ✅ List trashed files
-router.get("/trash/all",getTrashedFiles);
-
+router.get("/trash/all", authenticate, getTrashedFiles);
 // ✅ Unshare file
-router.patch("/:id/unshare",unshareFile);
-
+router.patch("/:id/unshare", authenticate, validateMongoId, unshareFile);
 // ✅ Rename file
-router.patch("/:id/rename",renameFile);
+router.patch("/:id/rename", authenticate, validateMongoId, renameFile);
 
 // ✅ Permanently delete file
 router.patch('/:id/permanent', authenticate, validateMongoId, permanentlyDeleteFile);
-
 // Test routes for debugging
 router.get('/test/ping', (req, res) => {
   res.json({

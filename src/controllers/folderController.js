@@ -36,10 +36,7 @@ const createFolder = async (req, res) => {
     if (parent) {
       const parentFolder = await Folder.findOne({
         _id: parent,
-        $or: [
-          { owner: req.user._id },
-          { 'shareSettings.sharedWith.user': req.user._id, 'shareSettings.sharedWith.permissions': { $in: ['write', 'admin'] } }
-        ],
+        owner: req.user._id, // FIXED: Only check owner access
         isDeleted: false
       });
 
@@ -82,16 +79,13 @@ const createFolder = async (req, res) => {
   }
 };
 
-// Get user folders
+// Get user folders - FIXED to only show user's folders
 const getUserFolders = async (req, res) => {
   try {
     const { parent, search, page = 1, limit = 50 } = req.query;
 
     let query = {
-      $or: [
-        { owner: req.user._id },
-        { 'shareSettings.sharedWith.user': req.user._id }
-      ],
+      owner: req.user._id, // FIXED: Only get folders owned by current user
       isDeleted: false
     };
 
@@ -122,6 +116,7 @@ const getUserFolders = async (req, res) => {
         {
           $match: {
             folder: folder._id,
+            owner: req.user._id, // FIXED: Only count user's files
             isDeleted: false
           }
         },
@@ -169,20 +164,16 @@ const getUserFolders = async (req, res) => {
   }
 };
 
-// Get folder by ID
+// Get folder by ID - FIXED
 const getFolderById = async (req, res) => {
   try {
     const folder = await Folder.findOne({
       _id: req.params.id,
-      $or: [
-        { owner: req.user._id },
-        { 'shareSettings.sharedWith.user': req.user._id }
-      ],
+      owner: req.user._id, // FIXED: Only get user's folders
       isDeleted: false
     })
     .populate('parent', 'name path')
-    .populate('owner', 'name email')
-    .populate('shareSettings.sharedWith.user', 'name email');
+    .populate('owner', 'name email');
 
     if (!folder) {
       return res.status(404).json({
@@ -191,14 +182,11 @@ const getFolderById = async (req, res) => {
       });
     }
 
-    // Get folder contents
+    // Get folder contents - FIXED to only show user's content
     const [subfolders, files] = await Promise.all([
       Folder.find({
         parent: folder._id,
-        $or: [
-          { owner: req.user._id },
-          { 'shareSettings.sharedWith.user': req.user._id }
-        ],
+        owner: req.user._id, // FIXED: Only user's subfolders
         isDeleted: false
       })
       .populate('owner', 'name email')
@@ -206,21 +194,19 @@ const getFolderById = async (req, res) => {
 
       File.find({
         folder: folder._id,
-        $or: [
-          { owner: req.user._id },
-          { 'shareSettings.sharedWith.user': req.user._id }
-        ],
+        owner: req.user._id, // FIXED: Only user's files
         isDeleted: false
       })
       .populate('owner', 'name email')
       .sort({ name: 1 })
     ]);
 
-    // Get folder statistics
+    // Get folder statistics - FIXED
     const folderStats = await File.aggregate([
       {
         $match: {
           folder: folder._id,
+          owner: req.user._id, // FIXED: Only count user's files
           isDeleted: false
         }
       },
@@ -244,7 +230,6 @@ const getFolderById = async (req, res) => {
         parent: folder.parent,
         owner: folder.owner,
         color: folder.color,
-        shareSettings: folder.shareSettings,
         stats: {
           totalFiles: stats.totalFiles,
           totalSubfolders: subfolders.length,
@@ -265,7 +250,7 @@ const getFolderById = async (req, res) => {
             originalName: f.originalName || f.name,
             size: f.size,
             mimeType: f.mimeType,
-            url: f.url,
+            url: f.cloudinaryUrl,
             owner: f.owner,
             createdAt: f.createdAt
           }))
@@ -283,17 +268,14 @@ const getFolderById = async (req, res) => {
   }
 };
 
-// Update folder
+// Update folder - FIXED
 const updateFolder = async (req, res) => {
   try {
     const { name, parent, color } = req.body;
 
     const folder = await Folder.findOne({
       _id: req.params.id,
-      $or: [
-        { owner: req.user._id },
-        { 'shareSettings.sharedWith.user': req.user._id, 'shareSettings.sharedWith.permissions': { $in: ['write', 'admin'] } }
-      ],
+      owner: req.user._id, // FIXED: Only allow updating user's folders
       isDeleted: false
     });
 
@@ -330,10 +312,7 @@ const updateFolder = async (req, res) => {
         // Verify new parent exists and user has access
         const parentFolder = await Folder.findOne({
           _id: parent,
-          $or: [
-            { owner: req.user._id },
-            { 'shareSettings.sharedWith.user': req.user._id, 'shareSettings.sharedWith.permissions': { $in: ['write', 'admin'] } }
-          ],
+          owner: req.user._id, // FIXED: Only user's folders as parent
           isDeleted: false
         });
 
@@ -345,7 +324,7 @@ const updateFolder = async (req, res) => {
         }
 
         // Prevent moving folder into itself or its descendants
-        const descendants = await getDescendants(folder._id);
+        const descendants = await getDescendants(folder._id, req.user._id);
         if (descendants.includes(parent) || parent === folder._id.toString()) {
           return res.status(400).json({
             success: false,
@@ -389,14 +368,18 @@ const updateFolder = async (req, res) => {
   }
 };
 
-// Helper function to get descendants
-const getDescendants = async (folderId) => {
+// Helper function to get descendants - FIXED
+const getDescendants = async (folderId, userId) => {
   try {
-    const folder = await Folder.findById(folderId);
+    const folder = await Folder.findOne({
+      _id: folderId,
+      owner: userId
+    });
     if (!folder) return [];
 
     const descendants = await Folder.find({
-      path: { $regex: `^${folder.path}/` }
+      path: { $regex: `^${folder.path}/` },
+      owner: userId // FIXED: Only get user's descendants
     }).select('_id');
 
     return descendants.map(d => d._id.toString());
@@ -406,7 +389,7 @@ const getDescendants = async (folderId) => {
   }
 };
 
-// Delete folder (soft delete)
+// Delete folder (soft delete) - FIXED
 const deleteFolder = async (req, res) => {
   try {
     const { id } = req.params;
@@ -424,24 +407,36 @@ const deleteFolder = async (req, res) => {
       });
     }
 
-    // Find all descendant folders
+    // Find all descendant folders - FIXED
     const descendants = await Folder.find({
       path: { $regex: `^${folder.path}/` },
-      owner: req.user._id
+      owner: req.user._id // FIXED: Only user's descendants
     });
 
     const allFolderIds = [folder._id, ...descendants.map(f => f._id)];
 
-    // Mark folders as deleted
+    // Mark folders as deleted - FIXED
     await Folder.updateMany(
-      { _id: { $in: allFolderIds } },
-      { isDeleted: true, deletedAt: new Date() }
+      { 
+        _id: { $in: allFolderIds },
+        owner: req.user._id // FIXED: Only update user's folders
+      },
+      { 
+        isDeleted: true, 
+        deletedAt: new Date() 
+      }
     );
 
-    // Mark files inside these folders as deleted
+    // Mark files inside these folders as deleted - FIXED
     await File.updateMany(
-      { folder: { $in: allFolderIds } },
-      { isDeleted: true, deletedAt: new Date() }
+      { 
+        folder: { $in: allFolderIds },
+        owner: req.user._id // FIXED: Only update user's files
+      },
+      { 
+        isDeleted: true, 
+        deletedAt: new Date() 
+      }
     );
 
     res.json({ 
@@ -457,7 +452,7 @@ const deleteFolder = async (req, res) => {
   }
 };
 
-// Restore folder from trash
+// Restore folder from trash - FIXED
 const restoreFolder = async (req, res) => {
   try {
     const folder = await Folder.findOne({
@@ -473,27 +468,33 @@ const restoreFolder = async (req, res) => {
       });
     }
 
-    // Get all descendant folders
+    // Get all descendant folders - FIXED
     const descendants = await Folder.find({
       path: { $regex: `^${folder.path}/` },
-      owner: req.user._id,
+      owner: req.user._id, // FIXED: Only user's descendants
       isDeleted: true
     });
 
     const allFolderIds = [folder._id, ...descendants.map(f => f._id)];
 
-    // Restore the folder and all its descendants
+    // Restore the folder and all its descendants - FIXED
     await Folder.updateMany(
-      { _id: { $in: allFolderIds } },
+      { 
+        _id: { $in: allFolderIds },
+        owner: req.user._id // FIXED: Only restore user's folders
+      },
       { 
         isDeleted: false, 
         deletedAt: null 
       }
     );
 
-    // Restore all files in these folders
+    // Restore all files in these folders - FIXED
     await File.updateMany(
-      { folder: { $in: allFolderIds } },
+      { 
+        folder: { $in: allFolderIds },
+        owner: req.user._id // FIXED: Only restore user's files
+      },
       { 
         isDeleted: false, 
         deletedAt: null 
@@ -513,13 +514,13 @@ const restoreFolder = async (req, res) => {
   }
 };
 
-// Get trash folders
+// Get trash folders - FIXED
 const getTrashFolders = async (req, res) => {
   try {
     const { page = 1, limit = 50 } = req.query;
 
     const folders = await Folder.find({
-      owner: req.user._id,
+      owner: req.user._id, // FIXED: Only user's folders
       isDeleted: true
     })
     .populate('parent', 'name path')
@@ -528,14 +529,14 @@ const getTrashFolders = async (req, res) => {
     .skip((page - 1) * limit);
 
     const total = await Folder.countDocuments({
-      owner: req.user._id,
+      owner: req.user._id, // FIXED: Only user's folders
       isDeleted: true
     });
 
     res.json({
       success: true,
-      folders: folders.map(folder => ({
-        id: folder._id,
+      trashedFolders: folders.map(folder => ({ // FIXED: Use trashedFolders key
+        _id: folder._id, // FIXED: Use _id instead of id
         name: folder.name,
         path: folder.path,
         parent: folder.parent,
@@ -558,6 +559,8 @@ const getTrashFolders = async (req, res) => {
     });
   }
 };
+
+// Permanently delete folder - FIXED
 const permanentlyDeleteFolder = async (req, res) => {
   try {
     const { id } = req.params;
@@ -575,22 +578,25 @@ const permanentlyDeleteFolder = async (req, res) => {
       });
     }
 
-    // Find all descendants (also must belong to same user)
+    // Find all descendants - FIXED
     const descendants = await Folder.find({
       path: { $regex: `^${folder.path}/` },
-      owner: req.user._id
+      owner: req.user._id // FIXED: Only user's descendants
     });
 
     const allFolderIds = [folder._id, ...descendants.map(f => f._id)];
 
-    // Delete all files in these folders
+    // Delete all files in these folders - FIXED
     await File.deleteMany({ 
       folder: { $in: allFolderIds },
       owner: req.user._id
     });
 
-    // Delete the folders themselves
-    await Folder.deleteMany({ _id: { $in: allFolderIds } });
+    // Delete the folders themselves - FIXED
+    await Folder.deleteMany({ 
+      _id: { $in: allFolderIds },
+      owner: req.user._id
+    });
 
     res.json({
       success: true,
@@ -604,7 +610,6 @@ const permanentlyDeleteFolder = async (req, res) => {
     });
   }
 };
-
 
 // Share folder with user
 const shareFolderWithUser = async (req, res) => {
@@ -686,7 +691,7 @@ const shareFolderWithUser = async (req, res) => {
   }
 };
 
-// Get folder breadcrumb
+// Get folder breadcrumb - FIXED
 const getFolderBreadcrumb = async (req, res) => {
   try {
     const folderId = req.params.id;
@@ -694,10 +699,7 @@ const getFolderBreadcrumb = async (req, res) => {
 
     let currentFolder = await Folder.findOne({
       _id: folderId,
-      $or: [
-        { owner: req.user._id },
-        { 'shareSettings.sharedWith.user': req.user._id }
-      ],
+      owner: req.user._id, // FIXED: Only user's folders
       isDeleted: false
     });
 
@@ -719,10 +721,7 @@ const getFolderBreadcrumb = async (req, res) => {
       if (currentFolder.parent) {
         currentFolder = await Folder.findOne({
           _id: currentFolder.parent,
-          $or: [
-            { owner: req.user._id },
-            { 'shareSettings.sharedWith.user': req.user._id }
-          ],
+          owner: req.user._id, // FIXED: Only user's folders
           isDeleted: false
         });
       } else {
