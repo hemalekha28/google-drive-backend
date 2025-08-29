@@ -642,6 +642,94 @@ const getSharedFile = async (req, res) => {
   }
 };
 
+const makeFilePublic = async (req, res) => {
+  try {
+    const file = await File.findOne({
+      _id: req.params.id,
+      owner: req.user._id,
+      isDeleted: false
+    });
+
+    if (!file) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+
+    // Generate share token if doesn't exist
+    if (!file.shareToken) {
+      file.shareToken = crypto.randomBytes(16).toString("hex");
+    }
+
+    file.isShared = true;
+    file.shareSettings.isPublic = true;
+    await file.save();
+
+    res.json({
+      success: true,
+      message: 'File is now public',
+      shareUrl: `${process.env.FRONTEND_URL}/shared/${file.shareToken}`
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+
+// Make file private
+const makeFilePrivate = async (req, res) => {
+  try {
+    const file = await File.findOne({
+      _id: req.params.id,
+      owner: req.user._id,
+      isDeleted: false
+    });
+
+    if (!file) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+
+    // Initialize shareSettings if it doesn't exist
+    if (!file.shareSettings) {
+      file.shareSettings = {
+        isPublic: false,
+        sharedWith: []
+      };
+    }
+
+    file.shareSettings.isPublic = false;
+    
+    // If no individual shares exist, make completely unshared
+    if (!file.shareSettings.sharedWith || file.shareSettings.sharedWith.length === 0) {
+      file.isShared = false;
+      file.shareToken = null;
+    }
+
+    await file.save();
+
+    res.json({
+      success: true,
+      message: 'File is now private',
+      file: {
+        id: file._id,
+        name: file.name,
+        isShared: file.isShared,
+        shareSettings: file.shareSettings
+      }
+    });
+  } catch (error) {
+    console.error('Make file private error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to make file private'
+    });
+  }
+};
+
 module.exports = {
   uploadFile,
   getUserFiles,
@@ -655,5 +743,7 @@ module.exports = {
   restoreFile,
   downloadFile,
   permanentlyDeleteFile,
-  getSharedFile
+  getSharedFile,
+  makeFilePublic,
+  makeFilePrivate
 };

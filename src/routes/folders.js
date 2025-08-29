@@ -15,7 +15,9 @@ const {
   shareFolderWithUser,
   getFolderBreadcrumb,
   permanentlyDeleteFolder,
-  getSharedFolder
+  getSharedFolder,
+  makeFolderPublic,
+  makeFolderPrivate
 } = require('../controllers/folderController');
 
 const { authenticate } = require('../middleware/auth');
@@ -39,6 +41,7 @@ const mongoIdValidation = (req, res, next) => {
 router.post('/', authenticate, folderValidation, createFolder);
 router.get('/', authenticate, getUserFolders);
 
+
 // FIXED: Get trash folders with authentication
 router.get('/trash', authenticate, getTrashFolders);
 
@@ -60,5 +63,9 @@ router.get('/shared/:token', authenticate, getSharedFolder);
 
 // Share folder
 router.patch('/:id/share', authenticate, mongoIdValidation, shareValidation, shareFolderWithUser);
+
+router.patch('/:id/make-public', authenticate, mongoIdValidation, makeFolderPublic);
+
+router.patch('/:id/make-private', authenticate, mongoIdValidation, makeFolderPrivate);
 
 module.exports = router;

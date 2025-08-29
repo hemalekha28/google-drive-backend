@@ -17,7 +17,9 @@ const {
   restoreFile,
   downloadFile,
   permanentlyDeleteFile,
-  getSharedFile
+  getSharedFile,
+  makeFilePublic,
+  makeFilePrivate
 } = require('../controllers/fileController');
 
 const router = express.Router();
@@ -138,6 +140,10 @@ router.patch("/:id/rename", authenticate, validateMongoId, renameFile);
 
 // ✅ Permanently delete file
 router.patch('/:id/permanent', authenticate, validateMongoId, permanentlyDeleteFile);
+
+router.patch('/:id/make-public', authenticate, validateMongoId, makeFilePublic);
+
+router.patch('/:id/make-private', authenticate, validateMongoId, makeFilePrivate);
 // Test routes for debugging
 router.get('/test/ping', (req, res) => {
   res.json({

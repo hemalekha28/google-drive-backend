@@ -3,6 +3,7 @@ const File = require('../models/File');
 const User = require('../models/User');
 const { sanitizeFilename } = require('../utils/validation');
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 
 // Create folder
 const createFolder = async (req, res) => {
@@ -869,6 +870,113 @@ const getFolderBreadcrumb = async (req, res) => {
   }
 };
 
+// Make folder public
+const makeFolderPublic = async (req, res) => {
+  try {
+    const folder = await Folder.findOne({
+      _id: req.params.id,
+      owner: req.user._id,
+      isDeleted: false
+    });
+
+    if (!folder) {
+      return res.status(404).json({
+        success: false,
+        message: 'Folder not found'
+      });
+    }
+
+    // Initialize shareSettings if it doesn't exist
+    if (!folder.shareSettings) {
+      folder.shareSettings = {
+        isPublic: false,
+        sharedWith: []
+      };
+    }
+
+    // Generate share token if doesn't exist
+    if (!folder.shareToken) {
+      folder.shareToken = crypto.randomBytes(16).toString("hex");
+    }
+
+    folder.isShared = true;
+    folder.shareSettings.isPublic = true;
+    await folder.save();
+
+    res.json({
+      success: true,
+      message: 'Folder is now publicly accessible',
+      shareUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/shared/${folder.shareToken}`,
+      folder: {
+        id: folder._id,
+        name: folder.name,
+        isShared: folder.isShared,
+        shareToken: folder.shareToken,
+        shareSettings: folder.shareSettings
+      }
+    });
+  } catch (error) {
+    console.error('Make folder public error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to make folder public'
+    });
+  }
+};
+
+// Make folder private
+const makeFolderPrivate = async (req, res) => {
+  try {
+    const folder = await Folder.findOne({
+      _id: req.params.id,
+      owner: req.user._id,
+      isDeleted: false
+    });
+
+    if (!folder) {
+      return res.status(404).json({
+        success: false,
+        message: 'Folder not found'
+      });
+    }
+
+    // Initialize shareSettings if it doesn't exist
+    if (!folder.shareSettings) {
+      folder.shareSettings = {
+        isPublic: false,
+        sharedWith: []
+      };
+    }
+
+    folder.shareSettings.isPublic = false;
+    
+    // If no individual shares exist, make completely unshared
+    if (!folder.shareSettings.sharedWith || folder.shareSettings.sharedWith.length === 0) {
+      folder.isShared = false;
+      folder.shareToken = null;
+    }
+
+    await folder.save();
+
+    res.json({
+      success: true,
+      message: 'Folder is now private',
+      folder: {
+        id: folder._id,
+        name: folder.name,
+        isShared: folder.isShared,
+        shareSettings: folder.shareSettings
+      }
+    });
+  } catch (error) {
+    console.error('Make folder private error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to make folder private'
+    });
+  }
+};
+
 module.exports = {
   createFolder,
   getUserFolders,
@@ -880,5 +988,7 @@ module.exports = {
   permanentlyDeleteFolder,
   shareFolderWithUser,
   getFolderBreadcrumb,
-  getSharedFolder
+  getSharedFolder,
+  makeFolderPublic,
+  makeFolderPrivate
 };

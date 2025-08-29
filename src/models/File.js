@@ -84,7 +84,7 @@ const fileSchema = new mongoose.Schema({
       },
       permission: {
         type: String,
-        enum: ['read', 'edit'],
+        enum: ['read', 'write'],
         default: 'read'
       },
       sharedAt: {
